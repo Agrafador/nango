@@ -2,6 +2,7 @@ import React from 'react';
 
 import { SidebarInset, SidebarProvider } from '@/components/ui/Sidebar';
 import { FunctionPlaygroundDrawer } from '@/features/Playground';
+import { useViewport } from '@/hooks/useViewport';
 import { AppHeader } from '@/layout/AppHeader';
 import { cn } from '@/utils/utils';
 import { AppSidebar } from './AppSidebar';
@@ -28,6 +29,8 @@ interface DashboardLayoutProps extends React.HTMLAttributes<HTMLDivElement> {
 
 const DashboardLayout = React.forwardRef<HTMLDivElement, DashboardLayoutProps>(
     ({ children, className, actions, pageHeader, hasPageHeading = false, breadcrumbLabel, width = 'full', secondaryNav, ...props }, ref) => {
+        useViewport('desktop');
+
         return (
             <SidebarProvider>
                 <AppSidebar />

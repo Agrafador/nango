@@ -1,4 +1,6 @@
-import type { AgentSession } from '@nangohq/types';
+import type { AgentSession, AgentSessionResolvedConnection } from '@nangohq/types';
+
+const MAX_ACCOUNT_LABEL_LENGTH = 100;
 
 /**
  * Sent once in the initialize result. Only what the session was created with goes in, so it says
@@ -17,10 +19,19 @@ export function buildSessionInstructions(session: AgentSession): string {
     ];
 
     if (nangoToolSearch || nangoExecute) {
-        sections.push(`## Stating your goal
-- Pass a goal to ${[nangoToolSearch && 'nango_tool_search', nangoExecute && 'nango_execute'].filter(Boolean).join(' and ')}: the task the user asked you to do, kept as close to their own words as you can.
-- Send the same goal on every call made for one task, and a new one only when the user asks for something else.
-- Leave names, emails, IDs and other personal details out of it.`);
+        const purpose = [
+            `## Stating your goal${nangoExecute ? ' and intent' : ''}`,
+            `- Pass a goal to ${[nangoToolSearch && 'nango_tool_search', nangoExecute && 'nango_execute'].filter(Boolean).join(' and ')}: the overall task the user asked you to do, kept as close to their own words as you can.`,
+            '- Send the same goal on every call made for one task, and a new one only when the user asks for something else.'
+        ];
+        if (nangoExecute) {
+            purpose.push(
+                "- Also pass an intent to nango_execute: how that one call helps toward the goal. It changes with every step, and is never the goal again or the tool's description.",
+                '- For example, when the user asks to "summarize my unread emails and save the summary in Notion", every call has that goal, and the intents go "list unread emails", "read the next batch of unread emails", then "create the summary page in Notion".'
+            );
+        }
+        purpose.push(`- Leave names, emails, IDs and other personal details out of ${nangoExecute ? 'both' : 'it'}.`);
+        sections.push(purpose.join('\n'));
     }
 
     if (nangoToolSearch) {
@@ -38,7 +49,6 @@ export function buildSessionInstructions(session: AgentSession): string {
         sections.push(`## Running a tool
 - Call a tool through nango_execute with its name exactly as listed${nangoToolSearch ? ' or as nango_tool_search returned it' : ''}, and its input.
 - nango_execute also runs tools that are not in your tool list, and tools whose input is not an object.
-- Also pass its intent: why you are calling this tool, such as "read the next batch of unread emails".
 - Ask tools for no more results than the task needs, and page through results rather than requesting everything at once.`);
     } else {
         sections.push(`## Running a tool
@@ -72,14 +82,42 @@ export function buildSessionInstructions(session: AgentSession): string {
 }
 
 function describeIntegrations(session: AgentSession): string {
-    const integrations = Object.entries(session.compiledToolset).sort(([a], [b]) => a.localeCompare(b));
+    const integrations = Object.entries(session.compiledToolset)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([id, { provider }]) => ({ id, provider, connection: connectionOf(session, id) }));
     if (integrations.length === 0) {
         return 'This session has no integrations, so it cannot act on any app.';
     }
 
     return [
         'By the integration id every tool expects:',
-        ...integrations.map(([id, { provider }]) => `- ${id} (${provider}): ${Object.hasOwn(session.resolvedConnections, id) ? 'connected' : 'not connected'}`),
+        ...integrations.map(({ id, provider, connection }) => `- ${id} (${provider}): ${describeConnection(connection)}`),
+        'Each connected integration is on the account of the user this session acts for.',
         `This is each integration's status when you received these instructions. ${session.metaTools.nangoCreateConnection.enabled ? 'After you connect one, or when unsure' : 'When unsure'}, trust ${session.metaTools.nangoToolSearch ? 'nango_tool_search results and ' : ''}tool errors over this list.`
     ].join('\n');
+}
+
+function connectionOf(session: AgentSession, integrationId: string): AgentSessionResolvedConnection | undefined {
+    return Object.hasOwn(session.resolvedConnections, integrationId) ? session.resolvedConnections[integrationId] : undefined;
+}
+
+function describeConnection(connection: AgentSessionResolvedConnection | undefined): string {
+    if (!connection) {
+        return 'not connected';
+    }
+
+    const accountLabel = connection.accountLabel ? cleanAccountLabel(connection.accountLabel) : '';
+    return accountLabel ? `connected by ${JSON.stringify(accountLabel)}` : 'connected';
+}
+
+/**
+ * The label is tag text the instructions quote, so it is kept to one short line that cannot start
+ * a line or a section of its own.
+ */
+function cleanAccountLabel(label: string): string {
+    return label
+        .replace(/[\s\p{Cc}\p{Cf}]+/gu, ' ')
+        .trim()
+        .slice(0, MAX_ACCOUNT_LABEL_LENGTH)
+        .trim();
 }
